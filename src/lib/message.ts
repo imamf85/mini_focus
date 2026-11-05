@@ -76,8 +76,8 @@ drg. Firstine Kelsi Hartanto, MClinDent., Sp.PM & drg. Pretty Trisfilha, M.Biome
 No. rekening: *1846472022*
 a.n. *SEMINAR ILMIAH FKG USAKTI*
 
-📸 Instagram: *minifokus.usakti26*
-✉️ Email: *minifokusfkgusakti@gmail.com*
+📸 *Instagram:* minifokus.usakti26
+✉️ *Email:* minifokusfkgusakti@gmail.com*
 
 Pilih kelas sesuai minat sejawat dan bergabung bersama kami di *Mini FOKUS 2026 Batch II!*
 
