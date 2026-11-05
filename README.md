@@ -119,7 +119,7 @@ Di mode development, terminal mencetak jumlah panggilan Sheets API per request (
 - Sebaliknya, bila bot sempat mengambil kontak yang baru diklaim agen, sinkronisasi membatalkan klaim itu (event `release`, catatan "bentrok dengan bot") dan kontak tersebut disembunyikan dari agen. Aplikasi tidak pernah menimpa sel `sent`/`image_ok`/`error...`.
 - Kolom baru (`id`, `operator`, `claimed_at`) ditambahkan di kanan; urutan kolom lama tidak berubah. Aplikasi membaca kolom lewat **nama header**.
 - Timestamp memakai format `dd/MM/yyyy HH:mm:ss` WIB dan ditulis dengan `valueInputOption=RAW` agar tidak diubah Sheets menjadi tanggal.
-- Kontak bertatus `manual_claimed` yang sudah punya riwayat event dan state-nya kembali free (setelah release/kedaluwarsa) boleh diklaim ulang, supaya tidak macet menunggu sinkronisasi.
+- Kontak berstatus `manual_claimed` yang sudah punya riwayat event dan state-nya kembali free (setelah release/kedaluwarsa) boleh diklaim ulang, supaya tidak macet menunggu sinkronisasi.
 
 ## 6. Kuota Google Sheets API
 
