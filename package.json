@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "init-sheet": "tsx scripts/init-sheet.ts",
-    "hash-pin": "tsx scripts/hash-pin.ts"
+    "init-sheet": "tsc -p tsconfig.scripts.json && node .scripts-out/scripts/init-sheet.js",
+    "hash-pin": "tsc -p tsconfig.scripts.json && node .scripts-out/scripts/hash-pin.js"
   },
   "dependencies": {
     "@googleapis/sheets": "^18.1.2",

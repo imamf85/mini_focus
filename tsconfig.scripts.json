@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "rootDir": ".",
+    "outDir": ".scripts-out",
+    "incremental": false,
+    "types": ["node"]
+  },
+  "files": ["scripts/init-sheet.ts", "scripts/hash-pin.ts"]
+}
