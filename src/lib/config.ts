@@ -33,7 +33,7 @@ export function loadAppConfig(env: Record<string, string | undefined> = process.
     pacingMinSec: e.PACING_SECONDS_MIN,
     pacingMaxSec: e.PACING_SECONDS_MAX,
     syncMinIntervalMs: 30_000,
-    cacheTtlMs: 7_000,
+    cacheTtlMs: 10_000,
   };
 }
 

@@ -17,7 +17,7 @@ describe("normalizePhone", () => {
   ])("%s -> %s", (input, out) => expect(normalizePhone(input)).toBe(out));
 
   it("maskPhone tidak membocorkan nomor penuh", () => {
-    expect(maskPhone("081234567890")).toBe("6281******90");
+    expect(maskPhone("081234567890")).toBe("6281*******90");
   });
 });
 
