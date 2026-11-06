@@ -118,7 +118,7 @@ export function MonitorApp() {
       )}
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <h2 className="mb-3 font-semibold">Pengiriman manual 7 hari terakhir</h2>
+        <h2 className="mb-3 font-semibold">Pengiriman pesan 7 hari terakhir</h2>
         <ul className="flex flex-col gap-2 text-sm">
           {data.daily.map((d) => (
             <li key={d.date} className="flex items-center gap-3">
