@@ -130,7 +130,6 @@ export function MonitorApp() {
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-xs text-gray-500">Belum termasuk pengiriman otomatis oleh bot.</p>
       </section>
     </main>
   );
