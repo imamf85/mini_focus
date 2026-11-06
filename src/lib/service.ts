@@ -120,6 +120,29 @@ export interface AdminSummary {
   serverTime: string;
 }
 
+export interface MonitorSummary {
+  totals: {
+    total: number;
+    /** Terkirim (bot + manual). */
+    sent: number;
+    botSent: number;
+    manualSent: number;
+    /** Nomor tidak terdaftar di WhatsApp / dilewati. */
+    notWa: number;
+    /** Error bot + terkirim sebagian (tanpa gambar). */
+    error: number;
+    held: number;
+    unprocessed: number;
+    /** Bagian dari unprocessed yang nomornya tidak valid (tidak akan pernah diklaim). */
+    invalidPhone: number;
+    percentDone: number;
+  };
+  /** 7 hari terakhir (WIB), pengiriman manual saja. */
+  daily: { date: string; manualSent: number }[];
+  lastActivityAt: string | null;
+  serverTime: string;
+}
+
 // Hash dummy valid supaya login untuk nama yang tidak ada memakan waktu serupa.
 const DUMMY_HASH = bcrypt.hashSync("dummy-pin", 10);
 
@@ -421,14 +444,7 @@ export class Dispatch {
     return { released: held.length };
   }
 
-  // ---------- admin ----------
-  async adminSummary(admin: string): Promise<AdminSummary> {
-    const snap = await this.store.snapshot();
-    const me = this.requireAgent(snap, admin);
-    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
-    const at = this.now();
-    const { states, agentLast } = this.reduce(snap, at);
-
+  private totals(snap: Snapshot, states: Map<string, ContactState>): AdminSummary["totals"] {
     const t = { total: 0, botSent: 0, botPartial: 0, manualSent: 0, notWa: 0, error: 0, held: 0, unprocessed: 0, percentDone: 0 };
     for (const c of snap.contacts) {
       t.total++;
@@ -443,6 +459,64 @@ export class Dispatch {
       }
     }
     t.percentDone = t.total ? Math.round(((t.botSent + t.manualSent + t.notWa) / t.total) * 1000) / 10 : 0;
+    return t;
+  }
+
+  // ---------- monitoring (pemilik proyek, hanya agregat) ----------
+  async monitorSummary(): Promise<MonitorSummary> {
+    const snap = await this.store.snapshot();
+    const at = this.now();
+    const { states } = this.reduce(snap, at);
+    const t = this.totals(snap, states);
+
+    let invalidPhone = 0;
+    for (const c of snap.contacts) {
+      if (classify(c, states.get(c.id)) === "unprocessed" && !normalizePhone(c.phone)) invalidPhone++;
+    }
+
+    const perDay = new Map<string, number>();
+    for (const st of states.values()) {
+      if (st.state !== "sent" || !st.resolvedAt) continue;
+      const k = wibDateKey(st.resolvedAt);
+      perDay.set(k, (perDay.get(k) ?? 0) + 1);
+    }
+    let lastActivityAt: number | null = null;
+    for (const e of snap.events) if (lastActivityAt === null || e.ts > lastActivityAt) lastActivityAt = e.ts;
+
+    const daily: MonitorSummary["daily"] = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = wibDateKey(at - i * 86_400_000);
+      daily.push({ date, manualSent: perDay.get(date) ?? 0 });
+    }
+
+    return {
+      totals: {
+        total: t.total,
+        sent: t.botSent + t.manualSent,
+        botSent: t.botSent,
+        manualSent: t.manualSent,
+        notWa: t.notWa,
+        error: t.error + t.botPartial,
+        held: t.held,
+        unprocessed: t.unprocessed,
+        invalidPhone,
+        percentDone: t.percentDone,
+      },
+      daily,
+      lastActivityAt: lastActivityAt ? formatWIB(lastActivityAt) : null,
+      serverTime: formatWIB(at),
+    };
+  }
+
+  // ---------- admin ----------
+  async adminSummary(admin: string): Promise<AdminSummary> {
+    const snap = await this.store.snapshot();
+    const me = this.requireAgent(snap, admin);
+    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
+    const at = this.now();
+    const { states, agentLast } = this.reduce(snap, at);
+
+    const t = this.totals(snap, states);
 
     const today = wibDateKey(at);
     const agents = snap.agents.map((a) => {

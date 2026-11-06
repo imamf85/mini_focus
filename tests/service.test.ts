@@ -298,6 +298,25 @@ describe("ringkasan admin", () => {
   });
 });
 
+describe("ringkasan monitor", () => {
+  it("hanya agregat: terkirim, tidak terdaftar, belum dikirim, dan nomor tidak valid", async () => {
+    const w = makeWorld([{ status: "sent" }, { status: "image_ok" }, { status: "not_wa" }, {}, {}]);
+    w.sheets.sheets.get("delivery_kitchen")![5][COL.phone] = "abc"; // contact c3: nomor tidak valid
+    const d = w.dispatch();
+    await d.claimBatch("Ani"); // hanya c4 yang bisa diklaim
+    const view = await d.getView("Ani");
+    await d.resolve("Ani", view.current!.id, "sent");
+    const s = await w.dispatch().monitorSummary();
+    expect(s.totals).toMatchObject({
+      total: 5, sent: 2, botSent: 1, manualSent: 1, notWa: 1, error: 1, held: 0, unprocessed: 1, invalidPhone: 1,
+    });
+    expect(s.daily).toHaveLength(7);
+    expect(s.daily[6].manualSent).toBe(1);
+    expect(s.lastActivityAt).not.toBeNull();
+    expect(JSON.stringify(s)).not.toMatch(/08123/); // tidak ada nomor telepon
+  });
+});
+
 describe("login", () => {
   it("memverifikasi PIN dan agen aktif", async () => {
     const w = makeWorld(1, [{ name: "Ani" }, { name: "Off", active: false }]);

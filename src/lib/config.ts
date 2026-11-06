@@ -69,3 +69,11 @@ export function loadSessionSecret(env: Record<string, string | undefined> = proc
   if (!s || s.length < 32) throw new Error("SESSION_SECRET wajib diisi (minimal 32 karakter)");
   return s;
 }
+
+/** Token akses halaman /monitor (read-only). Kosong = fitur nonaktif. */
+export function loadMonitorToken(env: Record<string, string | undefined> = process.env): string | null {
+  const t = env.MONITOR_TOKEN?.trim();
+  if (!t) return null;
+  if (t.length < 16) throw new Error("MONITOR_TOKEN minimal 16 karakter");
+  return t;
+}
