@@ -105,7 +105,7 @@ export function MonitorApp() {
       </section>
 
       <ul className="flex flex-col gap-3">
-        <Row label="Sudah terkirim" hint={`Bot ${nf.format(t.botSent)} · Manual ${nf.format(t.manualSent)}`} value={t.sent} total={t.total} color="bg-emerald-600" />
+        <Row label="Sudah terkirim" hint="Pesan dikirim dalam persen (%)" value={t.sent} total={t.total} color="bg-emerald-600" />
         <Row label="Belum dikirim" hint="Menunggu diambil agen" value={t.unprocessed} total={t.total} color="bg-gray-500" />
         <Row label="Sedang dikerjakan agen" hint="Sudah dipegang agen, belum terkirim" value={t.held} total={t.total} color="bg-amber-500" />
         <Row label="Nomor tidak terdaftar WhatsApp" hint="Tidak ada WA / dilewati" value={t.notWa} total={t.total} color="bg-sky-500" />
