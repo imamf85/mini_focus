@@ -2,8 +2,8 @@ import bcrypt from "bcryptjs";
 import type { AgentRow, AppConfig, Contact, ContactState, SheetEvent } from "./types";
 import { Store, type Snapshot } from "./store";
 import { canResolve, replayEvents } from "./state";
-import { formatWIB, greetingFor, wibDateKey } from "./time";
-import { normalizePhone } from "./phone";
+import { formatWIB, greetingFor, parseWIB, wibDateKey } from "./time";
+import { maskPhone, normalizePhone } from "./phone";
 import { buildMessage, waLink } from "./message";
 import { pacingWaitMs } from "./pacing";
 import { columnLetter } from "./sheets/a1";
@@ -141,6 +141,20 @@ export interface MonitorSummary {
   daily: { date: string; manualSent: number }[];
   lastActivityAt: string | null;
   serverTime: string;
+}
+
+export type MonitorList = "sent" | "pending" | "not_wa" | "held";
+
+export interface MonitorContact {
+  name: string;
+  /** Nomor tersamar (mis. 6281****89), bukan nomor lengkap. */
+  phone: string;
+  detail: string;
+}
+
+export interface MonitorContacts {
+  total: number;
+  items: MonitorContact[];
 }
 
 // Hash dummy valid supaya login untuk nama yang tidak ada memakan waktu serupa.
@@ -505,6 +519,46 @@ export class Dispatch {
       daily,
       lastActivityAt: lastActivityAt ? formatWIB(lastActivityAt) : null,
       serverTime: formatWIB(at),
+    };
+  }
+
+  /** Daftar kontak per kategori untuk halaman monitor: cari berdasarkan nama, nomor selalu tersamar. */
+  async monitorContacts(opts: { list: MonitorList; q: string; offset: number; limit: number }): Promise<MonitorContacts> {
+    const snap = await this.store.snapshot();
+    const { states } = this.reduce(snap, this.now());
+    const q = opts.q.trim().toLowerCase();
+
+    const rows: { c: Contact; detail: string; at: number }[] = [];
+    for (const c of snap.contacts) {
+      const st = states.get(c.id);
+      const cat = classify(c, st);
+      let detail: string;
+      let at = 0;
+      if (opts.list === "sent" && (cat === "bot_sent" || cat === "manual_sent")) {
+        at = (cat === "manual_sent" ? st?.resolvedAt : parseWIB(c.sentAt)) ?? 0;
+        detail = `${cat === "bot_sent" ? "Bot" : "Manual"}${at ? ` · ${formatWIB(at)}` : ""}`;
+      } else if (opts.list === "not_wa" && cat === "not_wa") {
+        at = st?.resolvedAt ?? 0;
+        detail = at ? formatWIB(at) : "";
+      } else if (opts.list === "held" && cat === "held") {
+        at = st?.claimedAt ?? 0;
+        detail = `${st?.holder ?? c.operator}${at ? ` · sejak ${formatWIB(at)}` : ""}`;
+      } else if (opts.list === "pending" && cat === "unprocessed") {
+        detail = normalizePhone(c.phone) ? "" : "Nomor tidak valid";
+      } else continue;
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      rows.push({ c, detail, at });
+    }
+
+    // terbaru dulu bila ada waktu; selebihnya urutan sheet
+    rows.sort((a, b) => b.at - a.at || a.c.rowNumber - b.c.rowNumber);
+    return {
+      total: rows.length,
+      items: rows.slice(opts.offset, opts.offset + opts.limit).map(({ c, detail }) => ({
+        name: c.name,
+        phone: maskPhone(c.phone),
+        detail,
+      })),
     };
   }
 

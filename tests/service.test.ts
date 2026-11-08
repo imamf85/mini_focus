@@ -317,6 +317,31 @@ describe("ringkasan monitor", () => {
   });
 });
 
+describe("daftar kontak monitor", () => {
+  it("memisahkan kategori, mencari berdasarkan nama, menyamarkan nomor, dan paginasi", async () => {
+    const w = makeWorld([{ status: "sent" }, { status: "not_wa" }, {}, {}, {}]);
+    const d = w.dispatch();
+    await d.claimBatch("Ani"); // c4, c3, c2 dipegang
+    const view = await d.getView("Ani");
+    await d.resolve("Ani", view.current!.id, "sent");
+    const m = (list: "sent" | "pending" | "not_wa" | "held", q = "", offset = 0, limit = 25) =>
+      w.dispatch().monitorContacts({ list, q, offset, limit });
+
+    const sent = await m("sent");
+    expect(sent.total).toBe(2);
+    expect(sent.items.map((i) => i.name).sort()).toEqual(["Dr 0", view.current!.name].sort());
+    expect((await m("not_wa")).items.map((i) => i.name)).toEqual(["Dr 1"]);
+    const held = await m("held");
+    expect(held.total).toBe(2);
+    expect(held.items[0].detail).toContain("Ani");
+    expect((await m("pending")).total).toBe(0);
+
+    expect((await m("sent", "dr 0")).items.map((i) => i.name)).toEqual(["Dr 0"]);
+    expect((await m("held", "", 1, 1)).items).toHaveLength(1);
+    expect(JSON.stringify([sent, held])).not.toMatch(/08123|628123\d{6}/); // nomor lengkap tidak bocor
+  });
+});
+
 describe("login", () => {
   it("memverifikasi PIN dan agen aktif", async () => {
     const w = makeWorld(1, [{ name: "Ani" }, { name: "Off", active: false }]);

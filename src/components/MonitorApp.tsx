@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MonitorSummary } from "@/lib/service";
+import type { MonitorContacts, MonitorSummary } from "@/lib/service";
 
 const REFRESH_MS = 60_000;
 const KEY = "mf_monitor_key";
+
+type ListKind = "sent" | "pending" | "not_wa" | "held";
+const PAGE = 25;
 
 const nf = new Intl.NumberFormat("id-ID");
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
@@ -24,6 +27,100 @@ function Row({ label, hint, value, total, color }: { label: string; hint: string
         <span className="tabular-nums">{pct(value, total)}%</span>
       </p>
     </li>
+  );
+}
+
+function ContactList({ list, title, count, keyRef }: { list: ListKind; title: string; count: number; keyRef: { current: string } }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<MonitorContacts["items"]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const seq = useRef(0);
+
+  const fetchPage = useCallback(
+    async (query: string, offset: number) => {
+      const id = ++seq.current;
+      setLoading(true);
+      try {
+        const qs = new URLSearchParams({ list, q: query, offset: String(offset), limit: String(PAGE) });
+        const res = await fetch(`/api/monitor/contacts?${qs}`, { cache: "no-store", headers: { "x-monitor-key": keyRef.current } });
+        const body = await res.json().catch(() => ({}));
+        if (id !== seq.current) return; // hasil basi (query sudah berganti)
+        if (!res.ok) throw new Error(body.message ?? "Gagal memuat");
+        const data = body as MonitorContacts;
+        setItems((prev) => (offset === 0 ? data.items : [...prev, ...data.items]));
+        setTotal(data.total);
+        setError("");
+      } catch (e) {
+        if (id === seq.current) setError(e instanceof Error ? e.message : "Gagal memuat");
+      } finally {
+        if (id === seq.current) setLoading(false);
+      }
+    },
+    [list, keyRef],
+  );
+
+  // Muat saat dibuka dan setiap pencarian berubah (debounce 400 ms; hemat kuota Sheets).
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => fetchPage(q, 0), q ? 400 : 0);
+    return () => clearTimeout(t);
+  }, [open, q, fetchPage]);
+
+  return (
+    <section className="rounded-2xl bg-white shadow-sm">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left"
+      >
+        <span className="font-semibold">{title}</span>
+        <span className="flex items-center gap-2">
+          <span className="tabular-nums text-gray-600">{nf.format(count)}</span>
+          <span aria-hidden>{open ? "▲" : "▼"}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 p-4">
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Cari nama dokter…"
+            aria-label={`Cari di ${title}`}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          />
+          {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+          <p className="mt-2 text-xs text-gray-500">
+            {q ? `${nf.format(total)} hasil` : `${nf.format(total)} kontak`} · nomor telepon disamarkan
+          </p>
+          <ul className="mt-1 divide-y divide-gray-100 text-sm">
+            {items.map((c, i) => (
+              <li key={i} className="flex justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{c.name}</span>
+                  <span className="block tabular-nums text-xs text-gray-500">{c.phone}</span>
+                </span>
+                {c.detail && <span className="shrink-0 text-right text-xs text-gray-500">{c.detail}</span>}
+              </li>
+            ))}
+            {!loading && items.length === 0 && <li className="py-2 text-gray-500">Tidak ada kontak.</li>}
+          </ul>
+          {items.length < total && (
+            <button
+              disabled={loading}
+              onClick={() => fetchPage(q, items.length)}
+              className="mt-2 w-full rounded-xl bg-gray-100 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              {loading ? "Memuat…" : "Muat lebih banyak"}
+            </button>
+          )}
+          {loading && items.length === 0 && <p className="py-2 text-sm text-gray-500">Memuat…</p>}
+        </div>
+      )}
+    </section>
   );
 }
 
