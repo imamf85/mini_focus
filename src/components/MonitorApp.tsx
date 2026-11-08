@@ -12,7 +12,10 @@ const PAGE = 25;
 const nf = new Intl.NumberFormat("id-ID");
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
 
-function Row({ label, hint, value, total, color }: { label: string; hint: string; value: number; total: number; color: string }) {
+function Row({
+  label, hint, value, total, color, list, keyRef,
+}: { label: string; hint: string; value: number; total: number; color: string; list?: ListKind; keyRef: { current: string } }) {
+  const [open, setOpen] = useState(false);
   return (
     <li className="rounded-2xl bg-white p-4 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
@@ -26,12 +29,23 @@ function Row({ label, hint, value, total, color }: { label: string; hint: string
         <span>{hint}</span>
         <span className="tabular-nums">{pct(value, total)}%</span>
       </p>
+      {list && (
+        <>
+          <button
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            className="mt-3 w-full rounded-xl bg-emerald-50 py-2 text-sm font-medium text-emerald-800"
+          >
+            {open ? "Tutup daftar ▲" : "Lihat daftar ▼"}
+          </button>
+          {open && <ContactList list={list} title={label} keyRef={keyRef} />}
+        </>
+      )}
     </li>
   );
 }
 
-function ContactList({ list, title, count, keyRef }: { list: ListKind; title: string; count: number; keyRef: { current: string } }) {
-  const [open, setOpen] = useState(false);
+function ContactList({ list, title, keyRef }: { list: ListKind; title: string; keyRef: { current: string } }) {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<MonitorContacts["items"]>([]);
   const [total, setTotal] = useState(0);
@@ -62,65 +76,49 @@ function ContactList({ list, title, count, keyRef }: { list: ListKind; title: st
     [list, keyRef],
   );
 
-  // Muat saat dibuka dan setiap pencarian berubah (debounce 400 ms; hemat kuota Sheets).
+  // Muat saat panel dibuka dan setiap pencarian berubah (debounce 400 ms; hemat kuota Sheets).
   useEffect(() => {
-    if (!open) return;
     const t = setTimeout(() => fetchPage(q, 0), q ? 400 : 0);
     return () => clearTimeout(t);
-  }, [open, q, fetchPage]);
+  }, [q, fetchPage]);
 
   return (
-    <section className="rounded-2xl bg-white shadow-sm">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 p-4 text-left"
-      >
-        <span className="font-semibold">{title}</span>
-        <span className="flex items-center gap-2">
-          <span className="tabular-nums text-gray-600">{nf.format(count)}</span>
-          <span aria-hidden>{open ? "▲" : "▼"}</span>
-        </span>
-      </button>
-      {open && (
-        <div className="border-t border-gray-100 p-4">
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Cari nama dokter…"
-            aria-label={`Cari di ${title}`}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-          />
-          {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
-          <p className="mt-2 text-xs text-gray-500">
-            {q ? `${nf.format(total)} hasil` : `${nf.format(total)} kontak`} · nomor telepon disamarkan
-          </p>
-          <ul className="mt-1 divide-y divide-gray-100 text-sm">
-            {items.map((c, i) => (
-              <li key={i} className="flex justify-between gap-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{c.name}</span>
-                  <span className="block tabular-nums text-xs text-gray-500">{c.phone}</span>
-                </span>
-                {c.detail && <span className="shrink-0 text-right text-xs text-gray-500">{c.detail}</span>}
-              </li>
-            ))}
-            {!loading && items.length === 0 && <li className="py-2 text-gray-500">Tidak ada kontak.</li>}
-          </ul>
-          {items.length < total && (
-            <button
-              disabled={loading}
-              onClick={() => fetchPage(q, items.length)}
-              className="mt-2 w-full rounded-xl bg-gray-100 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              {loading ? "Memuat…" : "Muat lebih banyak"}
-            </button>
-          )}
-          {loading && items.length === 0 && <p className="py-2 text-sm text-gray-500">Memuat…</p>}
-        </div>
+    <div className="mt-3 border-t border-gray-100 pt-3">
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Cari nama dokter…"
+        aria-label={`Cari di ${title}`}
+        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+      />
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+      <p className="mt-2 text-xs text-gray-500">
+        {q ? `${nf.format(total)} hasil` : `${nf.format(total)} kontak`} · nomor telepon disamarkan
+      </p>
+      <ul className="mt-1 divide-y divide-gray-100 text-sm">
+        {items.map((c, i) => (
+          <li key={i} className="flex justify-between gap-3 py-2">
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{c.name}</span>
+              <span className="block tabular-nums text-xs text-gray-500">{c.phone}</span>
+            </span>
+            {c.detail && <span className="shrink-0 text-right text-xs text-gray-500">{c.detail}</span>}
+          </li>
+        ))}
+        {!loading && items.length === 0 && <li className="py-2 text-gray-500">Tidak ada kontak.</li>}
+      </ul>
+      {items.length < total && (
+        <button
+          disabled={loading}
+          onClick={() => fetchPage(q, items.length)}
+          className="mt-2 w-full rounded-xl bg-gray-100 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {loading ? "Memuat…" : "Muat lebih banyak"}
+        </button>
       )}
-    </section>
+      {loading && items.length === 0 && <p className="py-2 text-sm text-gray-500">Memuat…</p>}
+    </div>
   );
 }
 
@@ -202,11 +200,11 @@ export function MonitorApp() {
       </section>
 
       <ul className="flex flex-col gap-3">
-        <Row label="Sudah terkirim" hint="Pesan dikirim dalam persen (%)" value={t.sent} total={t.total} color="bg-emerald-600" />
-        <Row label="Belum dikirim" hint="Menunggu diambil agen" value={t.unprocessed} total={t.total} color="bg-gray-500" />
-        <Row label="Sedang dikerjakan agen" hint="Sudah dipegang agen, belum terkirim" value={t.held} total={t.total} color="bg-amber-500" />
-        <Row label="Nomor tidak terdaftar WhatsApp" hint="Tidak ada WA / dilewati" value={t.notWa} total={t.total} color="bg-sky-500" />
-        <Row label="Gagal / error" hint="Error dari bot atau terkirim sebagian" value={t.error} total={t.total} color="bg-red-600" />
+        <Row label="Sudah terkirim" hint="Pesan dikirim dalam persen (%)" value={t.sent} total={t.total} color="bg-emerald-600" list="sent" keyRef={key} />
+        <Row label="Belum dikirim" hint="Menunggu diambil agen" value={t.unprocessed} total={t.total} color="bg-gray-500" list="pending" keyRef={key} />
+        <Row label="Sedang dikerjakan agen" hint="Sudah dipegang agen, belum terkirim" value={t.held} total={t.total} color="bg-amber-500" list="held" keyRef={key} />
+        <Row label="Nomor tidak terdaftar WhatsApp" hint="Tidak ada WA / dilewati" value={t.notWa} total={t.total} color="bg-sky-500" list="not_wa" keyRef={key} />
+        <Row label="Gagal / error" hint="Error dari bot atau terkirim sebagian" value={t.error} total={t.total} color="bg-red-600" keyRef={key} />
       </ul>
       {t.invalidPhone > 0 && (
         <p className="text-xs text-gray-500">
