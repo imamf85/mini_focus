@@ -178,6 +178,17 @@ export interface ResendCandidates {
   recentDays: number;
 }
 
+export interface ResendMatch {
+  /** Jumlah baris/nomor unik yang dibaca dari teks tempelan. */
+  parsed: number;
+  /** Id kontak layak kirim ulang yang cocok. */
+  ids: string[];
+  /** Nomor (tersamar) yang tidak ada di daftar kontak atau tidak valid. */
+  notFound: string[];
+  /** Nomor ada di daftar tetapi belum layak: belum pernah terkirim, atau sudah antre/dipegang. */
+  ineligible: { phone: string; reason: "not_sent" | "queued" }[];
+}
+
 export type MonitorList = "sent" | "pending" | "not_wa" | "held";
 
 export interface MonitorContact {
@@ -747,6 +758,52 @@ export class Dispatch {
       idsCapped: rows.length > MAX_RESEND_IDS,
       recentDays: RECENT_SEND_DAYS,
     };
+  }
+
+  /** Cocokkan nomor yang ditempel admin (satu per baris/koma) dengan kontak yang layak dikirim ulang. */
+  async adminMatchPhones(admin: string, text: string): Promise<ResendMatch> {
+    const snap = await this.store.snapshot();
+    const me = this.requireAgent(snap, admin);
+    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
+    const { states } = this.reduce(snap, this.now());
+
+    const byPhone = new Map<string, Contact[]>();
+    for (const c of snap.contacts) {
+      const p = normalizePhone(c.phone);
+      if (!p) continue;
+      byPhone.set(p, [...(byPhone.get(p) ?? []), c]);
+    }
+
+    const wanted = new Set<string>();
+    const invalid: string[] = [];
+    for (const raw of text.split(/[\r\n,;]+/)) {
+      if (!raw.trim()) continue;
+      const p = normalizePhone(raw);
+      if (p.length < 8) invalid.push(maskPhone(raw) || "***");
+      else wanted.add(p);
+    }
+
+    const ids = new Set<string>();
+    const notFound = [...invalid];
+    const ineligible: ResendMatch["ineligible"] = [];
+    for (const p of wanted) {
+      const contacts = byPhone.get(p);
+      if (!contacts) {
+        notFound.push(maskPhone(p));
+        continue;
+      }
+      let ok = false;
+      let reason: "not_sent" | "queued" = "not_sent";
+      for (const c of contacts) {
+        const st = states.get(c.id);
+        if (this.resendEligible(c, st)) {
+          ids.add(c.id);
+          ok = true;
+        } else if (st && st.resends > 0 && (st.state === "free" || st.state === "claimed")) reason = "queued";
+      }
+      if (!ok) ineligible.push({ phone: maskPhone(p), reason });
+    }
+    return { parsed: wanted.size + invalid.length, ids: [...ids], notFound, ineligible };
   }
 
   /** Buka ulang kontak terpilih supaya masuk antrean klaim biasa. Satu append untuk seluruh pilihan. */

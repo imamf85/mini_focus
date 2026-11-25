@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/client";
-import type { ResendCandidates } from "@/lib/service";
+import type { ResendCandidates, ResendMatch } from "@/lib/service";
 
 const PAGE = 25;
 const input = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm";
@@ -26,6 +26,23 @@ export function ResendPanel({ onChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [paste, setPaste] = useState("");
+  const [match, setMatch] = useState<ResendMatch | null>(null);
+
+  async function matchPaste() {
+    setBusy(true);
+    try {
+      const r = await api<ResendMatch>("/api/admin/resend/match", { method: "POST", body: { text: paste } });
+      setMatch(r);
+      setSelected((s) => new Set([...s, ...r.ids]));
+      setMsg("");
+      setError("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Gagal mencocokkan");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const p = new URLSearchParams({ q, source, operator, offset: String(page * PAGE), limit: String(PAGE) });
@@ -87,6 +104,43 @@ export function ResendPanel({ onChanged }: Props) {
       </button>
       {open && (
         <div className="mt-3 flex flex-col gap-3 text-sm">
+          <details className="rounded-xl border border-gray-200 p-3">
+            <summary className="cursor-pointer font-medium">Tempel daftar nomor</summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <textarea
+                className={`${input} h-32 font-mono`}
+                placeholder={"Satu nomor per baris (atau pisah koma), mis.\n0812xxxxxxx\n+62 813-xxxx-xxxx"}
+                value={paste}
+                onChange={(e) => { setPaste(e.target.value); setMatch(null); }}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  disabled={busy || !paste.trim()}
+                  onClick={matchPaste}
+                  className="rounded-lg bg-emerald-700 px-3 py-2 font-medium text-white disabled:opacity-50"
+                >
+                  Cocokkan &amp; pilih
+                </button>
+                {match && (
+                  <span className="text-gray-600">
+                    {match.parsed} nomor dibaca: <b className="text-emerald-700">{match.ids.length} dipilih</b>
+                    {match.notFound.length > 0 && <>, {match.notFound.length} tidak ditemukan</>}
+                    {match.ineligible.length > 0 && <>, {match.ineligible.length} belum layak</>}
+                  </span>
+                )}
+              </div>
+              {match && match.notFound.length > 0 && (
+                <p className="text-xs text-gray-500">Tidak ditemukan: {match.notFound.join(", ")}</p>
+              )}
+              {match && match.ineligible.length > 0 && (
+                <p className="text-xs text-gray-500">
+                  Belum layak:{" "}
+                  {match.ineligible.map((i) => `${i.phone} (${i.reason === "queued" ? "sudah antre" : "belum pernah terkirim"})`).join(", ")}
+                </p>
+              )}
+            </div>
+          </details>
+
           <div className="flex flex-wrap gap-2">
             <input className={`${input} min-w-40 flex-1`} placeholder="Cari nama…" value={q} onChange={(e) => { setQ(e.target.value); resetPage(); }} />
             <label className="flex items-center gap-1 text-gray-500">

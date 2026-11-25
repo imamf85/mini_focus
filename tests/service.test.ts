@@ -362,6 +362,27 @@ describe("kirim ulang (resend)", () => {
     expect(w.status(0)).toBe("sent");
   });
 
+  it("tempel daftar nomor: cocok dilewati format, dedup, dan dilaporkan yang tidak layak", async () => {
+    const w = makeWorld([{ status: "sent" }, {}, { status: "sent" }, { status: "sent" }]);
+    await w.dispatch().adminReopen("Admin", ["c3"]); // c3 sudah antre
+    const text = [
+      "08123000000", // c0 (bot sent)
+      "+62 812-3000-000", // c0 lagi, format lain -> dedup
+      "628123000002,08123000001", // c2 layak; c1 belum pernah terkirim
+      "08123000003", // c3 sudah antre
+      "0899999999", // tidak ada
+      "abc",
+    ].join("\n");
+    const r = await w.dispatch().adminMatchPhones("Admin", text);
+    expect(r.ids.sort()).toEqual(["c0", "c2"]);
+    expect(r.notFound).toHaveLength(2);
+    expect(r.ineligible.map((i) => i.reason).sort()).toEqual(["not_sent", "queued"]);
+    expect(r.ineligible.every((i) => i.phone.includes("*"))).toBe(true);
+    expect((await code(w.dispatch().adminMatchPhones("Ani", text)))?.status).toBe(403);
+    // hasilnya langsung bisa dibuka ulang
+    expect((await w.dispatch().adminReopen("Admin", r.ids)).reopened).toBe(2);
+  });
+
   it("filter tanggal, sumber, operator, dan nama", async () => {
     const w = makeWorld(3);
     await sendAll(w, "Ani");
