@@ -37,6 +37,14 @@ const BOT_BLOCKED = (status: string) => {
   return s === "sent" || s === "image_ok" || s.startsWith("error");
 };
 
+/** Kontak yang sedang/pernah dibuka ulang (resend): sel status bot tidak lagi memblokir. */
+const isBotLocked = (c: Contact, st: ContactState | undefined) =>
+  !(st && st.resends > 0) && BOT_BLOCKED(c.status);
+
+/** Batas hari "baru dikirim" untuk peringatan di UI kirim ulang (tidak memblokir). */
+const RECENT_SEND_DAYS = 7;
+const MAX_RESEND_IDS = 5000;
+
 type Category =
   | "bot_sent"
   | "bot_partial"
@@ -61,6 +69,8 @@ export function classify(c: Contact, st: ContactState | undefined): Category {
 /** Boleh diklaim: status sheet kosong (atau manual_claimed sisa release/expire) DAN state free. */
 export function isClaimable(c: Contact, st: ContactState | undefined): boolean {
   if (!normalizePhone(c.phone)) return false;
+  // Kirim ulang: kontak yang sudah dibuka ulang admin dan belum diselesaikan ulang.
+  if (st && st.resends > 0 && st.state === "free") return true;
   const s = c.status.trim().toLowerCase();
   if (s === "") return !st || st.state === "free";
   if (s === "manual_claimed") return !!st && st.state === "free";
@@ -115,6 +125,8 @@ export interface AdminSummary {
     held: number;
     dailyLimit: number;
   }[];
+  /** Kirim ulang: antre (free), dipegang agen, dan sudah terkirim ulang. */
+  resend: { queued: number; held: number; done: number };
   stuck: { agent: string; held: number; idleMinutes: number; expired: boolean }[];
   feed: { ts: string; agent: string; action: string; contact: string; note: string }[];
   serverTime: string;
@@ -141,6 +153,29 @@ export interface MonitorSummary {
   daily: { date: string; manualSent: number }[];
   lastActivityAt: string | null;
   serverTime: string;
+}
+
+export interface ResendCandidate {
+  id: string;
+  name: string;
+  /** Nomor tersamar. */
+  phone: string;
+  source: "bot" | "manual";
+  /** Agen pengirim terakhir (kosong untuk bot). */
+  operator: string;
+  sentAt: string | null;
+  /** Terkirim kurang dari RECENT_SEND_DAYS hari lalu (peringatan, tidak memblokir). */
+  recent: boolean;
+  resends: number;
+}
+
+export interface ResendCandidates {
+  total: number;
+  items: ResendCandidate[];
+  /** Semua id yang lolos filter (untuk "pilih semua hasil filter"), dibatasi. */
+  ids: string[];
+  idsCapped: boolean;
+  recentDays: number;
 }
 
 export type MonitorList = "sent" | "pending" | "not_wa" | "held";
@@ -239,13 +274,15 @@ export class Dispatch {
     const sentToday = this.sentToday(states, name, at);
 
     const heldAll = this.heldContacts(snap, states, name);
-    const held = heldAll.filter((c) => !BOT_BLOCKED(c.status));
+    const held = heldAll.filter((c) => !isBotLocked(c, states.get(c.id)));
     const botTaken = heldAll.length - held.length;
 
     let remaining = 0;
     for (const c of snap.contacts) {
       const cat = classify(c, states.get(c.id));
+      const st = states.get(c.id);
       if (cat === "unprocessed" || cat === "held") remaining++;
+      else if (st && st.resends > 0 && (st.state === "free" || st.state === "claimed")) remaining++;
     }
 
     const limitReached = sentToday >= agent.dailyLimit;
@@ -331,7 +368,11 @@ export class Dispatch {
       const need = want - won;
       const picks = snap.contacts
         .filter((c) => isClaimable(c, states.get(c.id)))
-        .sort((a, b) => b.rowNumber - a.rowNumber) // dari BAWAH; bot WAHA dari ATAS
+        .sort(
+          (a, b) =>
+            (states.get(b.id)?.resends ? 1 : 0) - (states.get(a.id)?.resends ? 1 : 0) || // kirim ulang dulu
+            b.rowNumber - a.rowNumber, // dari BAWAH; bot WAHA dari ATAS
+        )
         .slice(0, need);
       if (picks.length === 0) break;
 
@@ -371,7 +412,7 @@ export class Dispatch {
     const rejected = () => {
       const st = states.get(contactId);
       const c = snap.contacts.find((x) => x.id === contactId);
-      return !c || !canResolve(st, name) || BOT_BLOCKED(c.status);
+      return !c || !canResolve(st, name) || isBotLocked(c, st);
     };
     const alreadyDone = () => {
       const st = states.get(contactId);
@@ -388,7 +429,7 @@ export class Dispatch {
     if (!contact) throw new DispatchError("NOT_FOUND", "Kontak tidak ditemukan", 404);
     const st = states.get(contactId);
     if (alreadyDone()) return this.buildView(snap, name); // idempoten (tap ganda)
-    if (BOT_BLOCKED(contact.status)) {
+    if (isBotLocked(contact, st)) {
       throw new DispatchError("CONFLICT", "Kontak ini sudah diproses bot, jangan kirim manual", 409);
     }
     if (!canResolve(st, name)) throw new DispatchError("CONFLICT", CONFLICT_MESSAGE, 409);
@@ -600,6 +641,14 @@ export class Dispatch {
       };
     });
 
+    const resend = { queued: 0, held: 0, done: 0 };
+    for (const st of states.values()) {
+      if (st.resends === 0) continue;
+      if (st.state === "free") resend.queued++;
+      else if (st.state === "claimed") resend.held++;
+      else if (st.state === "sent") resend.done++;
+    }
+
     const heldPerAgent = new Map<string, number>();
     for (const st of states.values()) {
       if (st.state === "claimed" && st.holder) heldPerAgent.set(st.holder, (heldPerAgent.get(st.holder) ?? 0) + 1);
@@ -625,7 +674,99 @@ export class Dispatch {
         note: e.note,
       }));
 
-    return { totals: t, agents, stuck, feed, serverTime: formatWIB(at) };
+    return { totals: t, agents, resend, stuck, feed, serverTime: formatWIB(at) };
+  }
+
+  // ---------- kirim ulang (resend) ----------
+  /** Kontak yang pernah terkirim (bot/manual) dan belum sedang dalam antrean kirim ulang. */
+  private resendEligible(c: Contact, st: ContactState | undefined): boolean {
+    const cat = classify(c, st);
+    if (cat !== "bot_sent" && cat !== "manual_sent") return false;
+    if (!normalizePhone(c.phone)) return false;
+    return !st || st.state === "sent" || (st.state === "free" && st.resends === 0);
+  }
+
+  async adminResendCandidates(
+    admin: string,
+    opts: {
+      q: string;
+      from?: string; // YYYY-MM-DD (WIB), inklusif
+      to?: string;
+      source: "all" | "bot" | "manual";
+      operator: string;
+      offset: number;
+      limit: number;
+    },
+  ): Promise<ResendCandidates> {
+    const snap = await this.store.snapshot();
+    const me = this.requireAgent(snap, admin);
+    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
+    const at = this.now();
+    const { states } = this.reduce(snap, at);
+    const q = opts.q.trim().toLowerCase();
+    const recentAfter = at - RECENT_SEND_DAYS * 86_400_000;
+
+    const rows: { id: string; item: ResendCandidate; sentAt: number; row: number }[] = [];
+    for (const c of snap.contacts) {
+      const st = states.get(c.id);
+      if (!this.resendEligible(c, st)) continue;
+      const bot = classify(c, st) === "bot_sent";
+      const source = bot ? "bot" : "manual";
+      if (opts.source !== "all" && opts.source !== source) continue;
+      const sentAt = (bot ? parseWIB(c.sentAt) : (st?.resolvedAt ?? parseWIB(c.sentAt))) ?? 0;
+      const operator = bot ? "" : (st?.resolvedBy ?? c.operator);
+      if (opts.operator && operator !== opts.operator) continue;
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      if (sentAt) {
+        const day = wibDateKey(sentAt);
+        if (opts.from && day < opts.from) continue;
+        if (opts.to && day > opts.to) continue;
+      } else if (opts.from || opts.to) continue; // tanggal kirim tidak diketahui: tidak lolos filter tanggal
+      rows.push({
+        id: c.id,
+        sentAt,
+        row: c.rowNumber,
+        item: {
+          id: c.id,
+          name: c.name,
+          phone: maskPhone(c.phone),
+          source,
+          operator,
+          sentAt: sentAt ? formatWIB(sentAt) : null,
+          recent: sentAt > recentAfter,
+          resends: st?.resends ?? 0,
+        },
+      });
+    }
+
+    rows.sort((a, b) => a.sentAt - b.sentAt || a.row - b.row); // terlama dulu
+    return {
+      total: rows.length,
+      items: rows.slice(opts.offset, opts.offset + opts.limit).map((r) => r.item),
+      ids: rows.slice(0, MAX_RESEND_IDS).map((r) => r.id),
+      idsCapped: rows.length > MAX_RESEND_IDS,
+      recentDays: RECENT_SEND_DAYS,
+    };
+  }
+
+  /** Buka ulang kontak terpilih supaya masuk antrean klaim biasa. Satu append untuk seluruh pilihan. */
+  async adminReopen(admin: string, contactIds: string[]): Promise<{ reopened: number; skipped: number; batchId: string }> {
+    const snap = await this.store.snapshot({ fresh: true });
+    const me = this.requireAgent(snap, admin);
+    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
+    const at = this.now();
+    const { states } = this.reduce(snap, at);
+    const byId = new Map(snap.contacts.map((c) => [c.id, c]));
+    const batchId = newId("r");
+
+    const events: SheetEvent[] = [];
+    for (const id of new Set(contactIds)) {
+      const c = byId.get(id);
+      if (!c || !this.resendEligible(c, states.get(id))) continue;
+      events.push({ ts: at, contactId: id, action: "reopen", agent: admin, batchId, note: "kirim ulang" });
+    }
+    await this.store.appendEvents(events);
+    return { reopened: events.length, skipped: new Set(contactIds).size - events.length, batchId };
   }
 
   // ---------- sinkronisasi balik ke sheet kontak ----------
@@ -649,6 +790,8 @@ export class Dispatch {
       for (const c of snap.contacts) {
         const st = states.get(c.id);
         if (!st) continue; // tanpa riwayat event: bukan urusan kita
+        // Kirim ulang yang belum selesai (antre/dipegang/dilewati): biarkan catatan pengiriman pertama di sheet.
+        if (st.resends > 0 && st.state !== "sent") continue;
         const cur = c.status.trim();
         const curL = cur.toLowerCase();
         const ours = curL === "" || curL.startsWith("manual_") || (curL === "not_wa" && c.operator !== "");

@@ -4,7 +4,8 @@ export type EventAction =
   | "skip"
   | "release"
   | "expire"
-  | "admin_release";
+  | "admin_release"
+  | "reopen";
 
 export interface SheetEvent {
   ts: number; // epoch ms
@@ -32,6 +33,8 @@ export interface ContactState {
   /** Pemegang klaim yang kedaluwarsa; masih boleh sent/skip jika belum diambil orang lain. */
   lapsedHolder: string | null;
   hasHistory: boolean;
+  /** Berapa kali kontak dibuka ulang untuk kirim ulang (resend). */
+  resends: number;
 }
 
 export interface Contact {

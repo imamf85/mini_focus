@@ -18,7 +18,7 @@ export const CONTACT_COLUMNS = [
   "claimed_at",
 ];
 
-const ACTIONS: EventAction[] = ["claim", "sent", "skip", "release", "expire", "admin_release"];
+const ACTIONS: EventAction[] = ["claim", "sent", "skip", "release", "expire", "admin_release", "reopen"];
 
 export interface Snapshot {
   contacts: Contact[];

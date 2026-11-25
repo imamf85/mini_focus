@@ -127,4 +127,51 @@ describe("reduceEvents", () => {
     const s = reduceEvents([ev("claim", "A", "c1", 0), ev("claim", "A", "c2", 7)], T0 + 8 * MIN, cfg);
     expect(s.get("c1")?.lastActivityAt).toBe(T0 + 7 * MIN);
   });
+
+  describe("reopen (kirim ulang)", () => {
+    it("sent -> free, riwayat kirim lama dipertahankan, resends bertambah, bisa diklaim agen mana pun", () => {
+      const s = reduceEvents(
+        [ev("claim", "A", "c1", 0), ev("sent", "A", "c1", 1), ev("reopen", "Admin", "c1", 2), ev("claim", "A", "c1", 3, "b2")],
+        T0 + 4 * MIN,
+        cfg,
+      );
+      expect(s.get("c1")).toMatchObject({ state: "claimed", holder: "A", resends: 1, resolvedBy: "A" });
+      const free = reduceEvents(
+        [ev("claim", "A", "c1", 0), ev("sent", "A", "c1", 1), ev("reopen", "Admin", "c1", 2)],
+        T0 + 3 * MIN,
+        cfg,
+      );
+      expect(free.get("c1")).toMatchObject({ state: "free", holder: null, resends: 1 });
+    });
+
+    it("reopen ganda pada kontak yang sudah antre diabaikan; sah lagi setelah terkirim ulang", () => {
+      const queued = reduceEvents([ev("reopen", "Admin", "c1", 0), ev("reopen", "Admin", "c1", 1)], T0 + 2 * MIN, cfg);
+      expect(queued.get("c1")?.resends).toBe(1); // kontak bot tanpa riwayat event
+      const again = reduceEvents(
+        [
+          ev("reopen", "Admin", "c1", 0),
+          ev("claim", "B", "c1", 1),
+          ev("sent", "B", "c1", 2),
+          ev("reopen", "Admin", "c1", 3),
+        ],
+        T0 + 4 * MIN,
+        cfg,
+      );
+      expect(again.get("c1")).toMatchObject({ state: "free", resends: 2 });
+    });
+
+    it("reopen pada kontak yang sedang dipegang diabaikan", () => {
+      const s = reduceEvents([ev("claim", "A", "c1", 0), ev("reopen", "Admin", "c1", 1)], T0 + 2 * MIN, cfg);
+      expect(s.get("c1")).toMatchObject({ state: "claimed", holder: "A", resends: 0 });
+    });
+
+    it("release/expire resend mengembalikan ke free tanpa kehilangan resends", () => {
+      const s = reduceEvents(
+        [ev("reopen", "Admin", "c1", 0), ev("claim", "A", "c1", 1), ev("release", "A", "c1", 2)],
+        T0 + 3 * MIN,
+        cfg,
+      );
+      expect(s.get("c1")).toMatchObject({ state: "free", resends: 1 });
+    });
+  });
 });

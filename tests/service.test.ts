@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DispatchError } from "@/lib/service";
+import { wibDateKey } from "@/lib/time";
 import { COL, MIN, makeWorld, viewIds } from "./fixtures";
 
 const code = async (p: Promise<unknown>) => {
@@ -277,6 +278,102 @@ describe("sinkronisasi ke sheet kontak", () => {
     const r = await w.dispatch().sync({ force: true });
     expect(w.status(0)).toBe("not_wa");
     expect(r.released).toBe(1);
+  });
+});
+
+describe("kirim ulang (resend)", () => {
+  const sendAll = async (w: ReturnType<typeof makeWorld>, agent: string) => {
+    const d = w.dispatch();
+    await d.claimBatch(agent);
+    for (const id of await viewIds(d, agent)) {
+      w.clock.t += 61_000;
+      await w.dispatch().resolve(agent, id, "sent");
+    }
+  };
+  const list = (d: ReturnType<ReturnType<typeof makeWorld>["dispatch"]>, o = {}) =>
+    d.adminResendCandidates("Admin", { q: "", source: "all", operator: "", offset: 0, limit: 100, ...o });
+
+  it("hanya kontak yang pernah terkirim (bot & manual) yang layak; non-admin ditolak", async () => {
+    const w = makeWorld([{ status: "sent" }, {}, { status: "error: x" }, { status: "image_ok" }]);
+    const d = w.dispatch();
+    await d.claimBatch("Ani"); // klaim c1
+    w.clock.t += 61_000;
+    await w.dispatch().resolve("Ani", "c1", "sent");
+    const r = await list(w.dispatch());
+    expect(r.items.map((i) => [i.id, i.source]).sort()).toEqual([["c0", "bot"], ["c1", "manual"]]);
+    expect((await code(w.dispatch().adminResendCandidates("Ani", { q: "", source: "all", operator: "", offset: 0, limit: 5 })))?.status).toBe(403);
+    expect((await code(w.dispatch().adminReopen("Ani", ["c0"])))?.status).toBe(403);
+  });
+
+  it("reopen kontak manual: diklaim lagi, dikirim ulang, sheet tetap manual_sent, tidak ganda", async () => {
+    const w = makeWorld(3);
+    await sendAll(w, "Ani"); // c0..c2 terkirim
+    await w.dispatch().sync({ force: true });
+    expect(w.status(1)).toBe("manual_sent");
+    const r = await w.dispatch().adminReopen("Admin", ["c1", "c2", "c1", "tidak-ada"]);
+    expect(r).toMatchObject({ reopened: 2, skipped: 1 });
+    expect((await list(w.dispatch())).total).toBe(1); // c0 saja; c1,c2 sudah antre
+
+    // Budi dan Citra berebut: hanya satu yang mendapat tiap kontak
+    const [b, c] = await Promise.all([w.dispatch().claimBatch("Budi"), w.dispatch().claimBatch("Citra")]);
+    expect(b.held + c.held).toBe(2);
+    const view = b.held ? b : c;
+    const agent = b.held ? "Budi" : "Citra";
+    expect(view.current?.locked).toBe(false);
+    w.clock.t += 61_000;
+    for (const id of await viewIds(w.dispatch(), agent)) {
+      await w.dispatch().resolve(agent, id, "sent");
+      w.clock.t += 61_000;
+    }
+    const summary = await w.dispatch().adminSummary("Admin");
+    expect(summary.resend).toEqual({ queued: 0, held: 0, done: 2 });
+    expect(w.status(1)).toBe("manual_sent");
+    expect((await list(w.dispatch())).total).toBe(3); // layak dikirim ulang lagi
+  });
+
+  it("kontak bot: bisa dikirim ulang, sel sheet milik bot tidak pernah ditimpa", async () => {
+    const w = makeWorld([{ status: "sent" }, { status: "sent" }]);
+    await w.dispatch().adminReopen("Admin", ["c0"]);
+    const d = w.dispatch();
+    const v = await d.claimBatch("Ani");
+    expect(v.held).toBe(1);
+    expect(v.current && !v.current.locked && v.current.id).toBe("c0");
+    expect(v.botTaken).toBe(0);
+    await d.sync({ force: true });
+    expect(w.status(0)).toBe("sent");
+    w.clock.t += 61_000;
+    await w.dispatch().resolve("Ani", "c0", "sent");
+    await w.dispatch().sync({ force: true });
+    expect(w.status(0)).toBe("sent");
+    expect(w.sheets.sheets.get("delivery_kitchen")![1][COL.operator]).toBe("");
+    // c1 (bot, tidak dibuka ulang) tetap tidak bisa diklaim
+    expect((await w.dispatch().claimBatch("Budi")).held).toBe(0);
+  });
+
+  it("resend didahulukan daripada kontak baru; skip resend tidak mengubah sheet jadi not_wa", async () => {
+    const w = makeWorld([{ status: "sent" }, {}, {}]);
+    await w.dispatch().adminReopen("Admin", ["c0"]);
+    const v = await w.dispatch({ batchSize: 1 }).claimBatch("Ani");
+    expect(v.held).toBe(1);
+    expect(v.current && !v.current.locked && v.current.id).toBe("c0"); // bukan c2 (baris paling bawah)
+    w.clock.t += 61_000;
+    await w.dispatch().resolve("Ani", "c0", "skip");
+    await w.dispatch().sync({ force: true });
+    expect(w.status(0)).toBe("sent");
+  });
+
+  it("filter tanggal, sumber, operator, dan nama", async () => {
+    const w = makeWorld(3);
+    await sendAll(w, "Ani");
+    const day = wibDateKey(w.clock.t);
+    expect((await list(w.dispatch(), { from: day, to: day })).total).toBe(3);
+    expect((await list(w.dispatch(), { from: "2099-01-01" })).total).toBe(0);
+    expect((await list(w.dispatch(), { source: "bot" })).total).toBe(0);
+    expect((await list(w.dispatch(), { operator: "Budi" })).total).toBe(0);
+    expect((await list(w.dispatch(), { q: "dr 1" })).total).toBe(1);
+    const page = await list(w.dispatch(), { limit: 2 });
+    expect([page.items.length, page.ids.length, page.recentDays]).toEqual([2, 3, 7]);
+    expect(page.items.every((i) => i.recent)).toBe(true);
   });
 });
 

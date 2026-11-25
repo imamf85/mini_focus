@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, MIN_REFRESH_MS } from "@/lib/client";
 import type { AdminSummary } from "@/lib/service";
+import { ResendPanel } from "./ResendPanel";
 
 const ACTION_LABEL: Record<string, string> = {
   claim: "mengambil",
@@ -11,6 +12,7 @@ const ACTION_LABEL: Record<string, string> = {
   release: "melepas",
   expire: "kedaluwarsa",
   admin_release: "dipaksa lepas",
+  reopen: "membuka ulang untuk kirim ulang",
 };
 
 function Tile({ label, value, tone = "" }: { label: string; value: number | string; tone?: string }) {
@@ -106,6 +108,15 @@ export function AdminApp() {
         <Tile label="Sedang dipegang" value={t.held} tone="text-amber-700" />
         <Tile label="Belum diproses" value={t.unprocessed} />
       </section>
+
+      <ResendPanel onChanged={load} />
+      {(data.resend.queued > 0 || data.resend.held > 0 || data.resend.done > 0) && (
+        <section className="grid grid-cols-3 gap-3">
+          <Tile label="Kirim ulang: antre" value={data.resend.queued} />
+          <Tile label="Kirim ulang: dipegang" value={data.resend.held} tone="text-amber-700" />
+          <Tile label="Kirim ulang: selesai" value={data.resend.done} tone="text-emerald-700" />
+        </section>
+      )}
 
       {data.stuck.length > 0 && (
         <section className="rounded-2xl border border-amber-400 bg-amber-50 p-4">

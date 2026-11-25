@@ -7,6 +7,7 @@ interface Internal {
   batchId: string | null;
   resolvedBy: string | null;
   resolvedAt: number | null;
+  resends: number;
 }
 
 const fresh = (): Internal => ({
@@ -16,6 +17,7 @@ const fresh = (): Internal => ({
   batchId: null,
   resolvedBy: null,
   resolvedAt: null,
+  resends: 0,
 });
 
 export interface ReduceConfig {
@@ -67,6 +69,19 @@ export function replayEvents(
           s.resolvedAt = e.ts;
         }
         break;
+      case "reopen":
+        // Kirim ulang: sent/skipped kembali free. resolvedBy/resolvedAt lama dipertahankan
+        // (riwayat pengiriman sebelumnya). Pada kontak free (mis. dikirim bot, tanpa riwayat
+        // event) hanya sah sekali: selama resends > 0 dan belum selesai, reopen ganda diabaikan.
+        // Kelayakan kontak (sudah pernah terkirim) divalidasi API sebelum event ditulis.
+        if (s.state === "sent" || s.state === "skipped" || (s.state === "free" && s.resends === 0)) {
+          s.state = "free";
+          s.holder = null;
+          s.claimedAt = null;
+          s.batchId = null;
+          s.resends++;
+        }
+        break;
       case "release":
         if (s.state === "claimed" && s.holder === e.agent) {
           s.state = "free";
@@ -114,6 +129,7 @@ export function replayEvents(
       expired: lapsed,
       lapsedHolder: lapsed ? s.holder : null,
       hasHistory: true,
+      resends: s.resends,
     });
   }
   return { states, agentLast };
