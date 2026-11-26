@@ -826,6 +826,29 @@ export class Dispatch {
     return { reopened: events.length, skipped: new Set(contactIds).size - events.length, batchId };
   }
 
+  /**
+   * Batalkan antrean kirim ulang yang belum diambil agen (state free, resends > 0).
+   * Tanpa contactIds = semua yang antre. Yang sedang dipegang atau sudah selesai tidak disentuh.
+   */
+  async adminRevokeReopen(admin: string, contactIds?: string[]): Promise<{ revoked: number; skipped: number }> {
+    const snap = await this.store.snapshot({ fresh: true });
+    const me = this.requireAgent(snap, admin);
+    if (!me.isAdmin) throw new DispatchError("FORBIDDEN", "Khusus admin", 403);
+    const at = this.now();
+    const { states } = this.reduce(snap, at);
+    const targets = contactIds ? [...new Set(contactIds)] : [...states.keys()];
+    const batchId = newId("v");
+
+    const events: SheetEvent[] = [];
+    for (const id of targets) {
+      const st = states.get(id);
+      if (!st || st.state !== "free" || st.resends === 0) continue;
+      events.push({ ts: at, contactId: id, action: "revoke_reopen", agent: admin, batchId, note: "batal kirim ulang" });
+    }
+    await this.store.appendEvents(events);
+    return { revoked: events.length, skipped: contactIds ? targets.length - events.length : 0 };
+  }
+
   // ---------- sinkronisasi balik ke sheet kontak ----------
   async sync(opts: { force?: boolean } = {}): Promise<{ skipped: boolean; updated: number; released: number }> {
     const at = this.now();

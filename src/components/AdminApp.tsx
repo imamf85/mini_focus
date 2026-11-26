@@ -13,6 +13,7 @@ const ACTION_LABEL: Record<string, string> = {
   expire: "kedaluwarsa",
   admin_release: "dipaksa lepas",
   reopen: "membuka ulang untuk kirim ulang",
+  revoke_reopen: "membatalkan kirim ulang",
 };
 
 function Tile({ label, value, tone = "" }: { label: string; value: number | string; tone?: string }) {
@@ -73,6 +74,20 @@ export function AdminApp() {
     }
   }
 
+  async function revokeResend() {
+    const n = data?.resend.queued ?? 0;
+    if (!confirm(`Batalkan ${n} kontak yang masih antre kirim ulang? Kontak kembali ke status terkirim.`)) return;
+    setBusy("revoke");
+    try {
+      await api("/api/admin/resend/revoke", { method: "POST", body: {} });
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Gagal membatalkan");
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (!data) return <main className="p-6 text-center text-gray-600">{error || "Memuat…"}</main>;
   const t = data.totals;
 
@@ -115,6 +130,15 @@ export function AdminApp() {
           <Tile label="Kirim ulang: antre" value={data.resend.queued} />
           <Tile label="Kirim ulang: dipegang" value={data.resend.held} tone="text-amber-700" />
           <Tile label="Kirim ulang: selesai" value={data.resend.done} tone="text-emerald-700" />
+          {data.resend.queued > 0 && (
+            <button
+              onClick={revokeResend}
+              disabled={busy === "revoke"}
+              className="col-span-3 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Batalkan {data.resend.queued} antrean kirim ulang
+            </button>
+          )}
         </section>
       )}
 

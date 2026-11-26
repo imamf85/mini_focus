@@ -8,6 +8,8 @@ interface Internal {
   resolvedBy: string | null;
   resolvedAt: number | null;
   resends: number;
+  /** Status sebelum tiap reopen (tumpukan), untuk dipulihkan saat reopen dibatalkan. */
+  beforeReopen: ContactStateName[];
 }
 
 const fresh = (): Internal => ({
@@ -18,6 +20,7 @@ const fresh = (): Internal => ({
   resolvedBy: null,
   resolvedAt: null,
   resends: 0,
+  beforeReopen: [],
 });
 
 export interface ReduceConfig {
@@ -75,11 +78,21 @@ export function replayEvents(
         // event) hanya sah sekali: selama resends > 0 dan belum selesai, reopen ganda diabaikan.
         // Kelayakan kontak (sudah pernah terkirim) divalidasi API sebelum event ditulis.
         if (s.state === "sent" || s.state === "skipped" || (s.state === "free" && s.resends === 0)) {
+          s.beforeReopen.push(s.state);
           s.state = "free";
           s.holder = null;
           s.claimedAt = null;
           s.batchId = null;
           s.resends++;
+        }
+        break;
+      case "revoke_reopen":
+        // Batalkan kirim ulang yang masih antre (free, belum diklaim): kembali ke status
+        // sebelum reopen (sent/skipped, riwayat resolvedBy/At tidak pernah dihapus).
+        // Yang sudah dipegang agen tidak disentuh. Admin diverifikasi API sebelum event ditulis.
+        if (s.state === "free" && s.resends > 0) {
+          s.state = s.beforeReopen.pop() ?? "free";
+          s.resends--;
         }
         break;
       case "release":

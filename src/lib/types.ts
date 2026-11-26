@@ -5,7 +5,8 @@ export type EventAction =
   | "release"
   | "expire"
   | "admin_release"
-  | "reopen";
+  | "reopen"
+  | "revoke_reopen";
 
 export interface SheetEvent {
   ts: number; // epoch ms

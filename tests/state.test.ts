@@ -144,6 +144,23 @@ describe("reduceEvents", () => {
       expect(free.get("c1")).toMatchObject({ state: "free", holder: null, resends: 1 });
     });
 
+    it("revoke_reopen: antre kembali ke sent/free; yang sudah dipegang tidak disentuh", () => {
+      const sent = reduceEvents(
+        [ev("claim", "A", "c1", 0), ev("sent", "A", "c1", 1), ev("reopen", "Admin", "c1", 2), ev("revoke_reopen", "Admin", "c1", 3)],
+        T0 + 4 * MIN,
+        cfg,
+      );
+      expect(sent.get("c1")).toMatchObject({ state: "sent", resends: 0, resolvedBy: "A" });
+      const bot = reduceEvents([ev("reopen", "Admin", "c1", 0), ev("revoke_reopen", "Admin", "c1", 1), ev("reopen", "Admin", "c1", 2)], T0 + 3 * MIN, cfg);
+      expect(bot.get("c1")).toMatchObject({ state: "free", resends: 1 }); // bisa dibuka ulang lagi
+      const held = reduceEvents(
+        [ev("claim", "A", "c1", 0), ev("sent", "A", "c1", 1), ev("reopen", "Admin", "c1", 2), ev("claim", "B", "c1", 3, "b2"), ev("revoke_reopen", "Admin", "c1", 4)],
+        T0 + 5 * MIN,
+        cfg,
+      );
+      expect(held.get("c1")).toMatchObject({ state: "claimed", holder: "B", resends: 1 });
+    });
+
     it("reopen ganda pada kontak yang sudah antre diabaikan; sah lagi setelah terkirim ulang", () => {
       const queued = reduceEvents([ev("reopen", "Admin", "c1", 0), ev("reopen", "Admin", "c1", 1)], T0 + 2 * MIN, cfg);
       expect(queued.get("c1")?.resends).toBe(1); // kontak bot tanpa riwayat event
